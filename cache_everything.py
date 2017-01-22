@@ -1,0 +1,75 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+import asyncio
+import io
+import nghttp2
+# import redis
+import ssl
+
+# See also: https://nghttp2.org/documentation/python-apiref.html
+
+
+class CacheEverything(nghttp2.BaseRequestHandler):
+
+    class ResponseBody(object):
+        def __init__(self, handler):
+            self.handler = handler
+            self.handler.eof = False
+            self.handler.buf = io.BytesIO()
+
+        def generate(self, n):
+            buf = self.handler.buf
+            data = buf.read1(n)
+            if not data and not self.handler.eof:
+                return None, nghttp2.DATA_DEFERRED
+            if self.handler.eof:
+                return data, nghttp2.DATA_EOF
+            return data, nghttp2.DATA_OK
+
+    @classmethod
+    def under(cls, host):
+        cls.upstream = host
+
+    @asyncio.coroutine
+    def get_http_header(self):
+        connect = asyncio.open_connection(*self.upstream, ssl=False)
+        reader, writer = yield from connect
+        req = 'GET %s HTTP/1.0\r\n\r\n' % self.path.decode('utf-8')
+        writer.write(req.encode('utf-8'))
+        # skip response header fields
+        while True:
+            line = yield from reader.readline()
+            line = line.rstrip()
+            if not line:
+                break
+        # read body
+        while True:
+            b = yield from reader.read(4096)
+            if not b:
+                break
+            self.buf.write(b)
+        writer.close()
+        self.buf.seek(0)
+        self.eof = True
+        self.resume()
+
+    def on_headers(self):
+        print(self.client_address, self.host, dict(self.headers))
+        body = self.ResponseBody(self)
+        asyncio.async(self.get_http_header())
+        self.send_response(status=200, body=body.generate)
+
+
+if __name__ == '__main__':
+    CERT, KEY = './cert.pem', './privkey.pem'
+    ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+    ctx.options = ssl.OP_ALL | ssl.OP_NO_SSLv2 | ssl.OP_NO_SSLv3
+    ctx.load_cert_chain(CERT, KEY)
+
+    THIS_HOST = ('192.168.10.112', 8443)
+    THAT_HOST = ('192.168.10.102', 8080)
+    CacheEverything.under(THAT_HOST)
+    # give None to ssl to make the server non-SSL/TLS
+    server = nghttp2.HTTP2Server(THIS_HOST, CacheEverything, ssl=ctx)
+    server.serve_forever()
