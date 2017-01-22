@@ -3,6 +3,10 @@ caches everything and serves over HTTP/2.
 
 ## Requirements
 - redis
+```
+$ sudo apt-get install redis-server
+$ pip install redis
+```
 - nghttp2
 ```
 $ sudo apt-get install nghttp2
