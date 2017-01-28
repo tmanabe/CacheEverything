@@ -10,7 +10,7 @@ $ pip install redis
 - nghttp2
 ```
 $ sudo apt-get install nghttp2
-$ pip install nghttp2
+$ python ./setup.py install
 ```
 - A pair of a key and a cert
 ```
