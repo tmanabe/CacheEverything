@@ -30,13 +30,12 @@ class CacheEverything(nghttp2.BaseRequestHandler):
     @classmethod
     def under(cls, host):
         cls.upstream = host
-        if hasattr(cls, 'redis'):
-            cls.redis.flushall()
         return cls
 
     @classmethod
     def to(cls, tuple):
         cls.redis = Redis(host=tuple[0], port=tuple[1], db=tuple[2])
+        cls.redis.flushall()
         return cls
 
     @asyncio.coroutine
@@ -90,7 +89,7 @@ if __name__ == '__main__':
     THAT_HOST = ('192.168.10.102', 8080)
     THIS_REDIS = ('127.0.0.1', 6379, 0)
     THIS_HOST = ('192.168.10.112', 8443)
-    CacheEverything.under(THAT_HOST) # .to(THIS_REDIS)
+    CacheEverything.under(THAT_HOST).to(THIS_REDIS)
 
     # give None to ssl to make the server non-SSL/TLS
     server = nghttp2.HTTP2Server(THIS_HOST, CacheEverything, ssl=ctx)
