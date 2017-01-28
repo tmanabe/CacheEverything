@@ -4,7 +4,7 @@
 import asyncio
 import io
 import nghttp2
-import redis
+from redis import Redis
 import ssl
 
 # See also: https://nghttp2.org/documentation/python-apiref.html
@@ -28,21 +28,25 @@ class CacheEverything(nghttp2.BaseRequestHandler):
             return data, nghttp2.DATA_OK
 
     @classmethod
-    def on(cls, host, db):
-        cls.redis = redis.Redis(host=host[0], port=host[1], db=db % 16)
-
-    @classmethod
     def under(cls, host):
         cls.upstream = host
-        cls.redis.flushall()
+        if hasattr(cls, 'redis'):
+            cls.redis.flushall()
+        return cls
+
+    @classmethod
+    def to(cls, tuple):
+        cls.redis = Redis(host=tuple[0], port=tuple[1], db=tuple[2])
+        return cls
 
     @asyncio.coroutine
     def get_contents(self):
-        if self.redis.exists(self.path):
+        if hasattr(self, 'redis') and self.redis.exists(self.path):
             print('Hit: %s' % self.path)
             self.buf.write(self.redis.get(self.path))
         else:
-            print('Unhit: %s' % self.path)
+            if hasattr(self, 'redis'):
+                print('Unhit: %s' % self.path)
             connect = asyncio.open_connection(*self.upstream, ssl=False)
             reader, writer = yield from connect
             req = 'GET %s HTTP/1.0\r\n\r\n' % self.path.decode('utf-8')
@@ -62,8 +66,9 @@ class CacheEverything(nghttp2.BaseRequestHandler):
                 l.append(b)
             b = b''.join(l)
             self.buf.write(b)
-            print('Write: %s' % self.path)
-            self.redis.set(self.path, b)
+            if hasattr(self, 'redis'):
+                print('Write: %s' % self.path)
+                self.redis.set(self.path, b)
             writer.close()
         self.buf.seek(0)
         self.eof = True
@@ -82,11 +87,11 @@ if __name__ == '__main__':
     ctx.options = ssl.OP_ALL | ssl.OP_NO_SSLv2 | ssl.OP_NO_SSLv3
     ctx.load_cert_chain(CERT, KEY)
 
-    THIS_HOST = ('192.168.10.112', 8443)
-    THIS_REDIS = ('127.0.0.1', 6379)
     THAT_HOST = ('192.168.10.102', 8080)
-    CacheEverything.on(THIS_REDIS, THIS_HOST[1])
-    CacheEverything.under(THAT_HOST)
+    THIS_REDIS = ('127.0.0.1', 6379, 0)
+    THIS_HOST = ('192.168.10.112', 8443)
+    CacheEverything.under(THAT_HOST) # .to(THIS_REDIS)
+
     # give None to ssl to make the server non-SSL/TLS
     server = nghttp2.HTTP2Server(THIS_HOST, CacheEverything, ssl=ctx)
     server.serve_forever()
